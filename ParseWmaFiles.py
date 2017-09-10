@@ -1,17 +1,13 @@
 #!/usr/bin/python
 
-import os, sys, subprocess, shlex, re, json
-import fnmatch
-import logging
-from subprocess import call
-from bson.code import Code
-import itertools
 import argparse
+import json
+import logging
+import os
+import subprocess
 
-from pprint import pprint
 import pymongo
 from pymongo import MongoClient
-from bson.son import SON
 
 client = MongoClient()
 db = client.music_mongodb
@@ -26,6 +22,9 @@ parser.add_argument('-r', '--rebuild', help='Rebuilds database indexes.', action
 parser.add_argument('-p', '--parse', help='Skips parsing audio files.', action="store_true")
 parser.add_argument('-a', '--audiopath', nargs='?', action='store', default=music_path, const=music_path)
 parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+parser.add_argument("-f", "--format",
+                    help="Format database before parsing anything - completely clears all data and rebuilds.",
+                    action="store_true")
 
 args = parser.parse_args()
 if args.verbose:
@@ -39,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 music_path = args.audiopath
 
+if args.format:
+    logger.info("Formatting database...")
+    music_records.delete_many({})
+
 music_records.create_index([('format.filename', pymongo.ASCENDING)], unique=True)
 
 # Mongodb aggregations
@@ -48,7 +51,7 @@ pipeline_format = [
 ]
 
 pipeline_artist = [
-    { "$group": {"_id": "$format.tags.artist", "tracks": {"$push": "$$ROOT"}, "track_count": {"$sum": 1}}},
+    {"$group": {"_id": "$format.tags.album_artist", "tracks": {"$push": "$$ROOT"}, "track_count": {"$sum": 1}}},
     { "$out": "artist_tracks"}
 ]
 
@@ -57,13 +60,17 @@ pipeline_album = [
     { "$out": "album_tracks"}
 ]
 
+pipeline_song = [
+    {"$group": {"_id": "$format.tags.title", "tracks": {"$push": "$$ROOT"}, "track_count": {"$sum": 1}}},
+    {"$out": "song_tracks"}
+]
 
 pipeline_artist_albums = [
     # { "$unwind": "$format.tags" },
     {
         "$group": {
             "_id": {
-                "artist": "$format.tags.artist",
+                "artist": "$format.tags.album_artist",
                 "album": "$format.tags.album"
             },
             "tracks": {
@@ -119,6 +126,7 @@ def rebuild_database():
     db.music_records.aggregate(pipeline_album)
     db.music_records.aggregate(pipeline_artist_albums)
     db.artist_album_tracks_raw.aggregate(pipeline_artist_albums_2)
+    db.music_records.aggregate(pipeline_song)
 
 logger.info('Starting the Run')
 logger.info(args)
@@ -137,4 +145,4 @@ if args.rebuild or args.parse:
     logger.info('Rebuilding database')
     rebuild_database()
 
-logger.info('Completed Run')
+logger.info('Completed Run, db has {0} records'.format(music_records.find({}).count()))
