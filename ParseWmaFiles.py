@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 
 import pymongo
 from pymongo import MongoClient
@@ -139,7 +140,13 @@ if args.parse:
         for file in files:
             logger.debug(len(path) * '--- ' + file + ' ' + os.path.join(root, file))
             if file.endswith(".wma") or file.endswith(".mp3") or file.endswith(".flac"):
-                probe_file(os.path.join(root, file))
+                try:
+                    probe_file(os.path.join(root, file))
+                except subprocess.CalledProcessError as err:
+                    logger.error(err)
+                    pass
+                except:
+                    logger.error("Unable to continue due to error:" + sys.exc_info()[0])
 
 if args.rebuild or args.parse:
     logger.info('Rebuilding database')
