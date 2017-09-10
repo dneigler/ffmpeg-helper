@@ -6,6 +6,7 @@ import logging
 from subprocess import call
 from bson.code import Code
 import itertools
+import argparse
 
 from pprint import pprint
 import pymongo
@@ -15,12 +16,29 @@ from bson.son import SON
 client = MongoClient()
 db = client.music_mongodb
 music_records = db.music_records
-logging.basicConfig(filename='parse_wma_files.log', level=logging.DEBUG)
-logger = logging.getLogger(__name__)
 
 music_path = "/Volumes/DATA/ServerFolders/Music"  # /Abbey Lincoln"  # A\ Turtle\'s\ Dream
 # music_path = "Abbey Lincoln" # /A Turtle's Dream"
 music_path = "/Volumes/MacbookHD2/eMusic"
+
+parser = argparse.ArgumentParser(description='Document audio files into an easy to query database.')
+parser.add_argument('-r', '--rebuild', help='Rebuilds database indexes.', action="store_true")
+parser.add_argument('-p', '--parse', help='Skips parsing audio files.', action="store_true")
+parser.add_argument('-a', '--audiopath', nargs='?', action='store', default=music_path, const=music_path)
+parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+
+args = parser.parse_args()
+if args.verbose:
+    logging.basicConfig(filename='parse_wma_files.log', level=logging.DEBUG,
+                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+else:
+    logging.basicConfig(filename='parse_wma_files.log', level=logging.INFO,
+                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+
+logger = logging.getLogger(__name__)
+
+music_path = args.audiopath
+
 music_records.create_index([('format.filename', pymongo.ASCENDING)], unique=True)
 
 # Mongodb aggregations
@@ -79,7 +97,6 @@ def artist_to_album_mapper(track_json):
     logger.debug(track_json)
     return {'album_artist': track_json.tags.album_artist, 'album': track_json.tags.album}
 
-
 def probe_file(filename):
     ffprobe_path = './ffprobe'
     # ffprobe_path = os.path.expanduser("~/ffmpeg") + '/ffprobe
@@ -96,6 +113,7 @@ def probe_file(filename):
     logger.debug('One post: {0}'.format(result))
     # pprint(p) # ['format']['tags'])
 
+def rebuild_database():
     db.music_records.aggregate(pipeline_format)
     db.music_records.aggregate(pipeline_artist)
     db.music_records.aggregate(pipeline_album)
@@ -103,12 +121,20 @@ def probe_file(filename):
     db.artist_album_tracks_raw.aggregate(pipeline_artist_albums_2)
 
 logger.info('Starting the Run')
-for root, dirs, files in os.walk(music_path):
-    path = root.split(os.sep)
-    logger.debug((len(path) - 1) * '--- ' + os.path.basename(root))
-    for file in files:
-        logger.debug(len(path) * '--- ' + file + ' ' + os.path.join(root, file))
-        if file.endswith(".wma") or file.endswith(".mp3") or file.endswith(".flac"):
-            probe_file(os.path.join(root, file))
+logger.info(args)
+
+if args.parse:
+    logger.info('Parsing audio files in {0}'.format(music_path))
+    for root, dirs, files in os.walk(music_path):
+        path = root.split(os.sep)
+        logger.debug((len(path) - 1) * '--- ' + os.path.basename(root))
+        for file in files:
+            logger.debug(len(path) * '--- ' + file + ' ' + os.path.join(root, file))
+            if file.endswith(".wma") or file.endswith(".mp3") or file.endswith(".flac"):
+                probe_file(os.path.join(root, file))
+
+if args.rebuild or args.parse:
+    logger.info('Rebuilding database')
+    rebuild_database()
 
 logger.info('Completed Run')
